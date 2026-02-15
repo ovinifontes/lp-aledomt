@@ -67,6 +67,102 @@ function initPhoneMask() {
 
 /**
  * ============================================
+ * SUPABASE INITIALIZATION
+ * ============================================
+ */
+const SUPABASE_URL = 'https://fvifzmpksrdivkorurdc.supabase.co';
+const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImZ2aWZ6bXBrc3JkaXZrb3J1cmRjIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzA2NTA0MDksImV4cCI6MjA4NjIyNjQwOX0.e7ediXoLeUUnMtAZwyRSy2lG52svvVJY4dJ0f8nBK-A';
+
+// URL do webhook
+const WEBHOOK_URL = 'https://n8n00-vini-n8n.hq6fn5.easypanel.host/webhook/captura_lp_geral_aledomt';
+
+let supabaseClient = null;
+
+function initSupabase() {
+    if (typeof supabase !== 'undefined') {
+        supabaseClient = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+    }
+}
+
+/**
+ * ============================================
+ * PHONE NUMBER FORMATTER
+ * ============================================
+ */
+function formatPhoneNumber(phone) {
+    // Remove todos os caracteres não numéricos
+    let numbers = phone.replace(/\D/g, '');
+    
+    // Se já começa com 55, remove para reprocessar
+    if (numbers.startsWith('55')) {
+        numbers = numbers.substring(2);
+    }
+    
+    // Remove o 0 inicial se houver (caso tenha digitado 065...)
+    if (numbers.startsWith('0')) {
+        numbers = numbers.substring(1);
+    }
+    
+    // Pega o DDD (primeiros 2 dígitos)
+    const ddd = numbers.substring(0, 2);
+    
+    // Pega o resto do número
+    let rest = numbers.substring(2);
+    
+    // Se não começar com 9, adiciona o 9
+    if (!rest.startsWith('9')) {
+        // Se o primeiro dígito não for 9, adiciona 9 no início
+        rest = '9' + rest;
+    }
+    
+    // Limita a 9 dígitos após o 9 (total de 10 dígitos: 9 + 8 dígitos)
+    if (rest.length > 10) {
+        rest = rest.substring(0, 10);
+    }
+    
+    // Formato final: 55 + DDD + 9 + resto
+    return `55${ddd}${rest}`;
+}
+
+/**
+ * ============================================
+ * WEBHOOK SENDER
+ * ============================================
+ */
+async function sendWebhook(name, phone) {
+    if (!WEBHOOK_URL) {
+        console.warn('Webhook URL não configurada');
+        return;
+    }
+    
+    try {
+        const webhookData = {
+            nome: name,
+            telefone: phone,
+            site: 'aledomt_lp_geral'
+        };
+        
+        const response = await fetch(WEBHOOK_URL, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify(webhookData)
+        });
+        
+        if (!response.ok) {
+            throw new Error(`Webhook falhou: ${response.status}`);
+        }
+        
+        console.log('Webhook enviado com sucesso:', webhookData);
+    } catch (error) {
+        console.error('Erro ao enviar webhook:', error);
+        // Não bloqueia o fluxo se o webhook falhar
+    }
+}
+
+/**
+ * ============================================
  * CONTACT FORM SUBMIT
  * ============================================
  */
@@ -75,17 +171,60 @@ function initContactForm() {
     
     if (!contactForm) return;
     
-    contactForm.addEventListener('submit', (e) => {
+    contactForm.addEventListener('submit', async (e) => {
         e.preventDefault();
         
+        const submitButton = contactForm.querySelector('.btn-submit');
+        const originalButtonText = submitButton.textContent;
+        
+        // Desabilitar botão e mostrar loading
+        submitButton.disabled = true;
+        submitButton.textContent = 'Enviando...';
+        
+        const rawPhone = document.getElementById('phone').value.trim();
+        const formattedPhone = formatPhoneNumber(rawPhone);
+        
         const formData = {
-            name: document.getElementById('name').value,
-            phone: document.getElementById('phone').value
+            name: document.getElementById('name').value.trim(),
+            phone: formattedPhone
         };
         
-        console.log('Form Submitted:', formData);
-        alert('Obrigado! Entraremos em contato em breve.');
-        contactForm.reset();
+        try {
+            // Salvar no Supabase
+            if (supabaseClient) {
+                const { data, error } = await supabaseClient
+                    .from('captura_aledomt_lp_geral')
+                    .insert([
+                        {
+                            nome: formData.name,
+                            telefone: formData.phone,
+                            created_at: new Date().toISOString()
+                        }
+                    ])
+                    .select();
+                
+                if (error) {
+                    throw error;
+                }
+                
+                console.log('Dados salvos no Supabase:', data);
+                
+                // Enviar webhook após salvar com sucesso
+                await sendWebhook(formData.name, formData.phone);
+                
+                alert('Obrigado! Entraremos em contato em breve.');
+                contactForm.reset();
+            } else {
+                throw new Error('Supabase não inicializado');
+            }
+        } catch (error) {
+            console.error('Erro ao salvar dados:', error);
+            alert('Ops! Ocorreu um erro ao enviar seus dados. Por favor, tente novamente ou entre em contato pelo WhatsApp.');
+        } finally {
+            // Reabilitar botão
+            submitButton.disabled = false;
+            submitButton.textContent = originalButtonText;
+        }
     });
 }
 
@@ -313,6 +452,7 @@ function initServiceCards() {
  * ============================================
  */
 document.addEventListener('DOMContentLoaded', () => {
+    initSupabase();
     initNavbarScroll();
     initMobileMenu();
     initPhoneMask();
