@@ -1,0 +1,16 @@
+# Pasta de rascunhos - tudo dentro será completamente ignorado
+rascunhos/
+
+# Arquivos do sistema
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+
+# Arquivos de editor
+*.swp
+*.swo
+*~
+.vscode/
+.idea/
